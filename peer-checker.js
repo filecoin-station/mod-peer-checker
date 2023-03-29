@@ -39,11 +39,11 @@ async function probe(peer) {
 }
 
 async function record({ peer, started, online }) {
-  const request_url = new URL("/api/v2/write", INFLUXDB_ENDPOINT);
-  request_url.searchParams.set("org", INFLUXDB_ORG_ID);
-  request_url.searchParams.set("bucket", INFLUXDB_BUCKET);
-  request_url.searchParams.set("precision", "ms");
-  const res = await fetch(request_url, {
+  const writerUrl = new URL("/api/v2/write", INFLUXDB_ENDPOINT);
+  writerUrl.searchParams.set("org", INFLUXDB_ORG_ID);
+  writerUrl.searchParams.set("bucket", INFLUXDB_BUCKET);
+  writerUrl.searchParams.set("precision", "ms");
+  const res = await fetch(writerUrl, {
     method: "POST",
     headers: {
       Accept: "application/json",
