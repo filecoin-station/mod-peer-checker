@@ -22,6 +22,7 @@ const PEERS = [
 ];
 
 async function probe(peer) {
+  console.log("Checking peer %s", peer);
   const requestPayload = new Uint8Array(0);
   const started = Date.now();
   try {
@@ -32,9 +33,24 @@ async function probe(peer) {
     }
 
     let result = concatUint8Arrays(chunks);
-    return { started, result };
+
+    // TODO: inspect the Identify response and log the user agent
+    // The message is encoded using protobuf, see the proto definition here:
+    // https://github.com/libp2p/specs/blob/master/identify/README.md#the-identify-message
+    // Zinnia does not support protobuf yet, see
+    // https://github.com/filecoin-station/zinnia/issues/160
+    //
+    // We can inspect the payload using e.g. `protoc`
+    //   pbpaste | xxd -r -p | protoc --decode_raw
+    // let hex = result.reduce((out, byte) => out + byte.toString(16).padStart(2, "0"), "");
+    // console.log("Received Identify Message:", hex);
+    // Unfortunately, the data received from libp2p seems to be invalid protobuf payload.
+    // We need to investigate this more.
+    console.log("Received Identify Message: %s bytes", result.length);
+    return { started, online: true };
   } catch (error) {
-    return { started, error };
+    console.error("Identify protocol failed:", error);
+    return { started, online: false };
   }
 }
 
@@ -55,6 +71,7 @@ async function record({ peer, started, online }) {
   if (!res.ok) {
     throw new Error(`InfluxDB API error ${res.status}\n${await res.text()}`);
   }
+  console.log("Submitted stats to InfluxDB.");
 }
 
 function sleep(durationInMs) {
@@ -63,50 +80,35 @@ function sleep(durationInMs) {
 
 // Merge an array of Uint8Array instances into a single Uint8Array
 function concatUint8Arrays(chunks) {
+  // How many bytes we have in total?
   let len = 0;
   for (const c of chunks) len += c.length;
+
+  // Create a new array to hold all bytes
   const result = new Uint8Array(len);
+
+  // Copy data from chunks to the new array
   let offset = 0;
   for (const c of chunks) {
     result.set(c, offset);
     offset += c;
   }
+
   return result;
 }
 
 while (true) {
   const peer = PEERS[Math.floor(Math.random() * PEERS.length)];
 
-  let checkResult;
-
   try {
-    console.log("Checking %s", peer);
-    checkResult = await probe(peer);
-    const { result, error } = checkResult;
-    if (result) {
-      // TODO: inspect the Identify response and log the user agent
-      // https://github.com/libp2p/specs/blob/master/identify/README.md#the-identify-message
-      // We can inspect the payload using e.g. `protoc`
-      //   pbpaste | xxd -r -p | protoc --decode_raw
-      // let hex = result.reduce((out, byte) => out + byte.toString(16).padStart(2, "0"), "");
-      // console.log("Received Identify Message:", hex);
-      // Unfortunately, the data received from libp2p are not
-      console.log("Recevied Identify Message: %s bytes", result.length);
-    } else {
-      console.error("Identify protocol failed:", error);
-    }
+    const { started, online } = await probe(peer);
+    await record({ peer, started, online });
+    Zinnia.jobCompleted();
   } catch (err) {
+    // TODO: report the error to Sentry
+    // TODO: log an activity entry when there are too many errors in a row, e.g. when offline
     console.error("Unexpected error (peer %s): %s", peer, err);
   }
-
-  try {
-    await record({ peer, started: checkResult.started, online: !!checkResult.result });
-    console.log("Submitted stats to InfluxDB.");
-  } catch (err) {
-    console.error("Cannot record stats: %s", err);
-  }
-
-  Zinnia.jobCompleted();
 
   await sleep(1000);
 }
